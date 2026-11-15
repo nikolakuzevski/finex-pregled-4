@@ -79,7 +79,6 @@ h1 span { display: block; }
 h1 i { display: block; font-style: normal; }
 .sub { margin-top: 2rem; font-size: clamp(1.125rem, 1rem + 0.45vw, 1.375rem); line-height: 1.45; max-width: 34ch; }
 .act { margin-top: 2.25rem; display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; }
-.cover__quote { grid-column: 1 / 6; grid-row: 2; padding-block: 0 clamp(2rem, 4.5vh, 3rem); font-size: 0.9375rem; color: var(--muted); max-width: 32ch; position: relative; z-index: 1; }
 .cover__photo { grid-column: 8 / -1; grid-row: 1 / -1; position: relative; overflow: hidden; background: #C9C9C6; }
 .cover__photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 30% 50%; filter: grayscale(1) contrast(1.05); }
 
@@ -110,6 +109,9 @@ html.is-open-mode .report__stage { position: sticky; top: 0; }
 html.is-open-mode .frame { display: block; position: absolute; inset: 0; z-index: 2; overflow: hidden; background: #BDBDBA; clip-path: inset(0 0 0 100%); }
 html.is-open-mode .building { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 html.is-open-mode .building img { width: 100%; height: 100%; max-width: none; filter: grayscale(1) contrast(1.05); }
+/* The building is zoomed out, so on wide screens the photo ends before the screen does. Its sky
+   only changes from top to bottom, so a strip of its right edge, stretched, carries it on. */
+html.is-open-mode .building__sky { position: absolute; left: calc(100% - 1px); top: 0; width: 400vw; height: 100%; background: url(img/sky-edge.jpg) 0 0 / 100% 100% no-repeat; filter: grayscale(1) contrast(1.05); }
 html.is-open-mode .cover__photo img { visibility: hidden; }
 html.is-open-mode .cover__photo { background: transparent; }
 
@@ -133,6 +135,9 @@ html.is-dock .floor { left: var(--margin) !important; right: var(--margin); top:
 html.is-dock .floor.is-on { visibility: visible; }
 html.is-dock .floor::before { display: none; }
 html.is-dock .floor .ticks { font-size: 0.9375rem; }
+/* on narrow screens the floors above are not labelled, so the card says what comes next */
+.floor__next { display: none; }
+html.is-dock .floor__next { display: block; margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px solid rgb(255 255 255 / 0.35); font-size: 0.875rem; color: rgb(255 255 255 / 0.85); }
 
 /* Static mode: the engine sets the pinned height inline; the cover is just a cover. */
 html:not(.is-open-mode) .report { height: auto !important; }
@@ -144,7 +149,7 @@ html:not(.is-open-mode) .report__stage.sc-stage { position: relative; height: au
   h1 i { transform: translateY(105%); animation: up 1000ms cubic-bezier(0.22, 1, 0.36, 1) forwards; animation-delay: calc(var(--i) * 120ms + 150ms); }
   .cover__photo img, .building img { animation: settle 2400ms cubic-bezier(0.33, 1, 0.68, 1) both; }
   .toc { animation: lift 900ms cubic-bezier(0.22, 1, 0.36, 1) 500ms both; }
-  .sub, .act, .cover__quote { animation: fade 700ms ease 650ms both; }
+  .sub, .act { animation: fade 700ms ease 650ms both; }
 }
 @keyframes up { to { transform: none; } }
 @keyframes settle { from { opacity: 0.6; } to { opacity: 1; } }
@@ -233,7 +238,6 @@ html:not(.is-open-mode) .report__stage.sc-stage { position: relative; height: au
   .sub { margin-top: 1rem; font-size: 1.0625rem; }
   .act { margin-top: 1.25rem; }
   .act .link { display: none; }
-  .cover__quote { display: none; }
   .cover__photo { flex: 1; min-height: 0; }
   .toc { position: absolute; left: 0; bottom: 0; width: 90%; margin: 0; padding: 1rem 1.25rem 1.25rem; }
   .toc__label { margin-bottom: 0.6rem; font-size: 0.875rem; }

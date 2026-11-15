@@ -72,7 +72,6 @@ const Report = (() => {
   const layer = report.querySelector('[data-building]');
   const photo = report.querySelector('[data-cover-photo]');
   const text = report.querySelector('[data-cover-text]');
-  const quote = report.querySelector('[data-cover-quote]');
   const toc = report.querySelector('[data-toc]');
   const cards = [...report.querySelectorAll('[data-floor]')];
   const mark = report.querySelector('[data-mark]');
@@ -94,15 +93,23 @@ const Report = (() => {
 
   function measure() {
     const vw = stage.clientWidth, vh = stage.clientHeight;
-    // The photo is at least the screen's width, and tall enough for a climb on a phone.
-    const W = Math.max(vw, vh * 1.27), H = W * 1.5;
-    const margin = parseFloat(getComputedStyle(root).getPropertyValue('--margin')) || 24;
-    let tx = Math.min(0, Math.max(vw - W, vw * TIP_X - W * TIP_X));
-    let room = vw - (tx + W * TIP_X) - 28 - margin;
-    const dock = room < 250;
-    if (dock) tx = Math.min(0, Math.max(vw - W, vw * 0.75 - W * TIP_X));
     const barH = bar.offsetHeight;
-    const anchor = dock ? vh * 0.38 : barH + (vh - barH) * 0.4;
+    const margin = parseFloat(getComputedStyle(root).getPropertyValue('--margin')) || 24;
+    // Zoomed out so three floors fit in the visible height at once: the one below (where you
+    // came from), the one you are on, and the one above (what comes next). GAP is the average
+    // distance between slab tips as a share of the photo's height. On wide screens the photo
+    // then ends before the screen does; .building__sky carries its sky on.
+    const GAP = 0.135, DOCK = 220;
+    const sizeFor = (area) => Math.max(vh * 1.15, area / 3.3 / GAP);
+    let H = sizeFor(vh - barH), W = H / 1.5, tx = 0;
+    const room = vw - W * TIP_X - 28 - margin;
+    const dock = room < 250;
+    if (dock) {
+      // narrow: the open service docks at the bottom, so the floors share what is left
+      H = sizeFor(vh - barH - DOCK); W = H / 1.5;
+      tx = Math.min(0, vw * 0.75 - W * TIP_X);
+    }
+    const anchor = dock ? barH + (vh - barH - DOCK) * 0.45 : barH + (vh - barH) * 0.42;
     // the cover's photo column, and the photo drawn in it as in the concept (cover, 30% 50%)
     const s = stage.getBoundingClientRect(), b = photo.getBoundingClientRect();
     const bx = b.left - s.left, by = b.top - s.top, bw = b.width, bh = b.height;
@@ -116,7 +123,7 @@ const Report = (() => {
     layer.style.width = W + 'px';
     layer.style.height = H + 'px';
     root.classList.toggle('is-dock', dock);
-    root.style.setProperty('--card-w', Math.min(380, Math.max(250, room)) + 'px');
+    root.style.setProperty('--card-w', Math.min(400, Math.max(250, room)) + 'px');
   }
 
   // where the view stands for a floor position (0 = bottom floor, 5 = top, fractions between)
@@ -152,8 +159,8 @@ const Report = (() => {
     frame.style.clipPath = `inset(${(c.t * k).toFixed(1)}px ${(c.r * k).toFixed(1)}px ${(c.b * k).toFixed(1)}px ${(c.l * k).toFixed(1)}px)`;
 
     const out = clamp(p / (A * 0.7));
-    text.style.opacity = quote.style.opacity = (1 - out).toFixed(3);
-    text.style.translate = quote.style.translate = `${(-50 * pa).toFixed(1)}px 0`;
+    text.style.opacity = (1 - out).toFixed(3);
+    text.style.translate = `${(-50 * pa).toFixed(1)}px 0`;
     const tocOut = clamp(p / (A * 0.45));
     toc.style.opacity = (1 - tocOut).toFixed(3);
     toc.style.translate = `0 ${(40 * tocOut).toFixed(1)}px`;
@@ -173,7 +180,7 @@ const Report = (() => {
   }
 
   function clear() {
-    [layer, frame, text, quote, toc, mark, title, ...cards].forEach((el) => {
+    [layer, frame, text, toc, mark, title, ...cards].forEach((el) => {
       el.style.transform = el.style.clipPath = el.style.opacity = el.style.translate = el.style.visibility = '';
     });
     cards.forEach((el) => el.classList.remove('is-on'));
