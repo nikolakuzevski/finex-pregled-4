@@ -2,9 +2,9 @@
 // - MK/EN switch: Macedonian in the markup, English in data-en (inner HTML) and data-en-<attr>.
 //   ?lang=en opens the page in English. (Same method as website/site/finex.js.)
 // - Phone menu, bar turns to paper once the page moves, current section marked in the menu.
-// - The signature move: on large screens the cover is pinned and the blue contents block opens
-//   over the whole screen into the services page. Progress is this act's own scroll position;
-//   the engine only pins it. Phones, small screens and reduced motion get no pin.
+// - The signature move: the cover is pinned, the building photo opens from its column to the
+//   whole screen, and the view climbs it floor by floor, one service per floor. Progress is this
+//   act's own scroll position; the engine only pins it. Reduced motion gets no pin.
 // - Contact form: checks the required fields; it is not wired to any inbox yet.
 // - Starts the scroll-craft engine (reveals, parallax and the pin's height).
 (() => {
@@ -58,74 +58,127 @@
   matchMedia('(min-width: 861px)').addEventListener('change', () => set(false));
 })();
 
-// The cover and its contents.
+// The cover and the building.
+// p is this act's scroll progress (0 at the top, 1 when the pin lets go):
+//   0 to A   the photo opens from its column on the cover to the whole screen and lands on the
+//            bottom floor; the cover's text and contents block step aside;
+//   A to B   the view climbs the building, one floor per service, resting a moment on each;
+//   B to 1   holds on the top floor, then the page moves on.
 const Report = (() => {
   const root = document.documentElement;
   const report = document.querySelector('[data-report]');
   const stage = report.querySelector('[data-sc-stage]');
-  const sheet = report.querySelector('[data-sheet]');
-  const toc = report.querySelector('[data-toc]');
+  const frame = report.querySelector('[data-frame]');
+  const layer = report.querySelector('[data-building]');
+  const photo = report.querySelector('[data-cover-photo]');
   const text = report.querySelector('[data-cover-text]');
-  const img = report.querySelector('[data-cover-img]');
+  const quote = report.querySelector('[data-cover-quote]');
+  const toc = report.querySelector('[data-toc]');
+  const cards = [...report.querySelectorAll('[data-floor]')];
+  const mark = report.querySelector('[data-mark]');
+  const title = report.querySelector('.floors__title');
   const bar = document.querySelector('[data-bar]');
-  const parts = [...sheet.querySelectorAll('[data-spread]')];
-  const mq = matchMedia('(min-width: 1000px) and (min-height: 600px) and (prefers-reduced-motion: no-preference)');
-  const clamp = (v) => Math.min(1, Math.max(0, v));
-  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-  let on = false;
-  let box = { t: 0, r: 0, b: 0, l: 0 };
-  let raf = 0;
+  const mq = matchMedia('(prefers-reduced-motion: no-preference) and (min-height: 520px)');
 
-  // Where the contents block sits inside the stage, without the load animation's transform.
+  // Measured on img/floors-bw.jpg (1600 x 2400): the right-hand tips of the white slabs, as a
+  // share of the image's width and height. Bottom floor first; the lowest slab is left out
+  // because the view cannot centre it without running off the photo.
+  const TIP_X = 0.677;
+  const FLOORS = [0.789, 0.640, 0.497, 0.364, 0.234, 0.108];
+  const A = 0.16, B = 0.94;
+
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  let on = false, raf = 0, active = -1, g = null;
+
   function measure() {
-    let x = 0, y = 0, el = toc;
-    while (el && el !== stage) { x += el.offsetLeft; y += el.offsetTop; el = el.offsetParent; }
-    const W = stage.clientWidth, H = stage.clientHeight;
-    box = { t: y, l: x, r: W - x - toc.offsetWidth, b: H - y - toc.offsetHeight };
-    root.style.setProperty('--toc-h', toc.offsetHeight + 'px');
+    const vw = stage.clientWidth, vh = stage.clientHeight;
+    // The photo is at least the screen's width, and tall enough for a climb on a phone.
+    const W = Math.max(vw, vh * 1.27), H = W * 1.5;
+    const margin = parseFloat(getComputedStyle(root).getPropertyValue('--margin')) || 24;
+    let tx = Math.min(0, Math.max(vw - W, vw * TIP_X - W * TIP_X));
+    let room = vw - (tx + W * TIP_X) - 28 - margin;
+    const dock = room < 250;
+    if (dock) tx = Math.min(0, Math.max(vw - W, vw * 0.75 - W * TIP_X));
+    const barH = bar.offsetHeight;
+    const anchor = dock ? vh * 0.38 : barH + (vh - barH) * 0.4;
+    // the cover's photo column, and the photo drawn in it as in the concept (cover, 30% 50%)
+    const s = stage.getBoundingClientRect(), b = photo.getBoundingClientRect();
+    const bx = b.left - s.left, by = b.top - s.top, bw = b.width, bh = b.height;
+    const fit = Math.max(bw / 1600, bh / 2400), dw = 1600 * fit, dh = 2400 * fit;
+    g = {
+      vw, vh, W, H, tx, dock, anchor,
+      s0: dw / W, x0: bx + (bw - dw) * 0.3, y0: by + (bh - dh) * 0.5,
+      clip0: { t: by, r: vw - bx - bw, b: vh - by - bh, l: bx },
+      tipX: tx + W * TIP_X,
+    };
+    layer.style.width = W + 'px';
+    layer.style.height = H + 'px';
+    root.classList.toggle('is-dock', dock);
+    root.style.setProperty('--card-w', Math.min(380, Math.max(250, room)) + 'px');
   }
 
-  // 0 at the top of the cover, 1 when the pin lets go.
+  // where the view stands for a floor position (0 = bottom floor, 5 = top, fractions between)
+  function camY(pos) {
+    const i = Math.min(FLOORS.length - 2, Math.floor(pos));
+    const y = lerp(FLOORS[i], FLOORS[i + 1], pos - i);
+    return Math.min(0, Math.max(g.vh - g.H, g.anchor - y * g.H));
+  }
+
   function progress() {
     const r = report.getBoundingClientRect();
     const travel = r.height - innerHeight;
     return travel > 0 ? clamp(-r.top / travel) : 0;
   }
 
+  // floor position for a progress value: rests on each floor for the first quarter of its step
+  function floorAt(p) {
+    const u = clamp((p - A) / (B - A)) * (FLOORS.length - 1);
+    const i = Math.min(FLOORS.length - 2, Math.floor(u));
+    return i + ease(clamp((u - i - 0.25) / 0.75));
+  }
+
   function paint() {
     raf = 0;
-    if (!on) return;
+    if (!on || !g) return;
     const p = progress();
-    // The cover holds still for the first few percent, then the sheet opens (p 0.06 to 0.56),
-    // and while it finishes the six services arrive one after another (0.36 to 0.75); then it
-    // holds.
-    const e = ease(clamp((p - 0.06) / 0.5));
-    const k = 1 - e;
-    const top = bar.offsetHeight;
-    sheet.style.clipPath = `inset(${(box.t * k + top * e).toFixed(1)}px ${(box.r * k).toFixed(1)}px ${(box.b * k).toFixed(1)}px ${(box.l * k).toFixed(1)}px)`;
-    const fade = clamp(1 - e / 0.22);
-    toc.style.opacity = fade.toFixed(3);
-    toc.style.visibility = fade > 0 ? '' : 'hidden';
-    // Three planes at three rates: the headline lifts, the photo pushes in slowly, the sheet
-    // comes over both.
-    const q = ease(clamp(p / 0.6));
-    text.style.translate = `0 ${(-80 * q).toFixed(1)}px`;
-    img.style.scale = (1 + 0.1 * q).toFixed(4);
-    img.style.translate = `0 ${(-3 * q).toFixed(2)}%`;
-    parts.forEach((el) => {
-      const n = Number(el.dataset.spread);
-      const v = ease(clamp((p - (0.36 + n * 0.035)) / 0.14));
-      el.style.opacity = v.toFixed(3);
-      el.style.translate = `0 ${((1 - v) * 24).toFixed(1)}px`;
+    const pa = ease(clamp(p / A));
+    const pos = floorAt(p);
+    const ty = camY(pos);
+    const s = lerp(g.s0, 1, pa), x = lerp(g.x0, g.tx, pa), y = lerp(g.y0, ty, pa);
+    layer.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${s.toFixed(4)})`;
+    const k = 1 - pa, c = g.clip0;
+    frame.style.clipPath = `inset(${(c.t * k).toFixed(1)}px ${(c.r * k).toFixed(1)}px ${(c.b * k).toFixed(1)}px ${(c.l * k).toFixed(1)}px)`;
+
+    const out = clamp(p / (A * 0.7));
+    text.style.opacity = quote.style.opacity = (1 - out).toFixed(3);
+    text.style.translate = quote.style.translate = `${(-50 * pa).toFixed(1)}px 0`;
+    const tocOut = clamp(p / (A * 0.45));
+    toc.style.opacity = (1 - tocOut).toFixed(3);
+    toc.style.translate = `0 ${(40 * tocOut).toFixed(1)}px`;
+    toc.style.visibility = tocOut >= 1 ? 'hidden' : '';
+
+    const show = clamp((p - A * 0.75) / (A * 0.25));
+    const now = Math.round(pos);
+    if (now !== active) { active = now; cards.forEach((el, n) => el.classList.toggle('is-on', n === now)); }
+    cards.forEach((el, n) => {
+      const tip = ty + FLOORS[n] * g.H;
+      if (!g.dock) el.style.transform = `translate(${(g.tipX + 28).toFixed(1)}px, ${(tip - 24).toFixed(1)}px)`;
+      el.style.opacity = show.toFixed(3);
     });
+    mark.style.transform = `translate(${g.tipX.toFixed(1)}px, ${(ty + FLOORS[now] * g.H).toFixed(1)}px)`;
+    mark.style.opacity = show.toFixed(3);
+    title.style.opacity = show.toFixed(3);
   }
 
   function clear() {
-    sheet.style.clipPath = '';
-    toc.style.opacity = ''; toc.style.visibility = '';
-    text.style.translate = '';
-    img.style.scale = ''; img.style.translate = '';
-    parts.forEach((el) => { el.style.opacity = ''; el.style.translate = ''; });
+    [layer, frame, text, quote, toc, mark, title, ...cards].forEach((el) => {
+      el.style.transform = el.style.clipPath = el.style.opacity = el.style.translate = el.style.visibility = '';
+    });
+    cards.forEach((el) => el.classList.remove('is-on'));
+    root.classList.remove('is-dock');
+    active = -1;
   }
 
   function setMode() {
@@ -134,9 +187,10 @@ const Report = (() => {
     if (on) { measure(); paint(); } else clear();
   }
 
-  // Where the services page is fully open: the place to land for any link to the services.
-  function servicesTop() {
-    return report.getBoundingClientRect().top + scrollY + 0.85 * (report.offsetHeight - innerHeight);
+  // the scroll position where floor n is in view
+  function floorTop(n) {
+    const p = A + (n / (FLOORS.length - 1)) * (B - A) + 0.005;
+    return report.getBoundingClientRect().top + scrollY + p * (report.offsetHeight - innerHeight);
   }
 
   setMode();
@@ -146,22 +200,25 @@ const Report = (() => {
   document.addEventListener('finex:lang', () => { if (on) { measure(); paint(); } });
   if (document.fonts) document.fonts.ready.then(() => { if (on) { measure(); paint(); } });
 
-  // In the pinned mode the services page has no place of its own in the document, so links to
-  // it scroll to the point where it is open.
+  // With the pin, the services have no place of their own in the document, so links to them
+  // climb to their floor.
+  const target = (hash) => (hash === '#uslugi' ? 0 : /^#s-[1-6]$/.test(hash) ? Number(hash.slice(3)) - 1 : -1);
   document.addEventListener('click', (ev) => {
     const a = ev.target.closest('a[href^="#"]');
     if (!a || !on) return;
-    const id = a.getAttribute('href').slice(1);
-    if (id !== 'uslugi' && !/^s-\d$/.test(id)) return;
+    const n = target(a.getAttribute('href'));
+    if (n < 0) return;
     ev.preventDefault();
-    scrollTo({ top: servicesTop(), behavior: 'smooth' });
+    scrollTo({ top: floorTop(n), behavior: 'smooth' });
   });
   addEventListener('load', () => {
-    if (on && /^#(uslugi|s-\d)$/.test(location.hash)) scrollTo({ top: servicesTop(), behavior: 'instant' });
+    const n = target(location.hash);
+    if (on && n >= 0) scrollTo({ top: floorTop(n), behavior: 'instant' });
   });
 
-  return { isOpen: () => on, progress, report };
+  return { isOpen: () => on, inServices: () => on && progress() > A * 0.6 && report.getBoundingClientRect().bottom > innerHeight * 0.45 };
 })();
+
 
 // Bar: paper once the page moves; the menu marks the section you are in.
 (() => {
@@ -175,7 +232,7 @@ const Report = (() => {
       const id = a.getAttribute('href').slice(1);
       let inView;
       if (id === 'uslugi' && Report.isOpen()) {
-        inView = Report.progress() > 0.45 && Report.report.getBoundingClientRect().bottom > mid;
+        inView = Report.inServices();
       } else {
         const r = document.getElementById(id).getBoundingClientRect();
         inView = r.top <= mid && r.bottom > mid;
